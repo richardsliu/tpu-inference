@@ -166,6 +166,7 @@ for i in $(seq 0 $((NUM_PREFILL_INSTANCES-1))); do
     PREFILL_PIDS+=($!)
 done
 
+sleep 30
 
 # Start decode instances
 for i in $(seq 0 $((NUM_DECODE_INSTANCES-1))); do
