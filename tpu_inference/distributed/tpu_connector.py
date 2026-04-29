@@ -230,6 +230,15 @@ class TPUConnector(KVConnectorBase_V1):
         assert self.connector_worker is not None
         return self.connector_worker.get_finished()
 
+    def get_kv_connector_stats(self) -> KVConnectorStats | None:
+        """
+        Get the KV transfer stats for the connector.
+        """
+        # Clear stats for next iteration
+        if not self.transfer_stats_accumulator.is_empty():
+            return self.transfer_stats_accumulator.clone_and_reset()
+        return None
+
     @classmethod
     def build_kv_connector_stats(
         cls, data: dict[str, Any] | None = None
