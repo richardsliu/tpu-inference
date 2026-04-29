@@ -1,4 +1,4 @@
-"""Stats and Prometheus metrics for the NIXL connector."""
+"""Stats and Prometheus metrics for the TPU KV connector."""
 
 import copy
 from dataclasses import dataclass
@@ -121,7 +121,7 @@ class TpuKVConnectorPromMetrics(KVConnectorPromMetrics):
         self.tpu_histogram_bytes_transferred = create_metric_per_engine(
             tpu_histogram_bytes_transferred, self.per_engine_labelvalues
         )
-        counter_nixl_num_failed_transfers = self._counter_cls(
+        counter_tpu_num_failed_transfers = self._counter_cls(
             name="vllm:tpu_num_failed_transfers",
             documentation="Number of failed TPU KV Cache transfers.",
             labelnames=labelnames,
@@ -146,7 +146,7 @@ class TpuKVConnectorPromMetrics(KVConnectorPromMetrics):
 
         for counter_obj, counter_item_key in zip(
             [
-                self.counter_nixl_num_failed_transfers,
+                self.counter_tpu_num_failed_transfers,
             ],
             ["num_failed_transfers"],
         ):
