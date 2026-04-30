@@ -93,6 +93,7 @@ def _test_performance_helper(monkeypatch: pytest.MonkeyPatch,
                       max_num_seqs=24,
                       max_num_batched_tokens=512,
                       enable_prefix_caching=False,
+                      model_loader_extra_config={"enable_weights_track": False},
                       async_scheduling=0)
 
         start_time = time.time()
@@ -109,6 +110,7 @@ def _test_performance_helper(monkeypatch: pytest.MonkeyPatch,
                         max_num_seqs=24,
                         max_num_batched_tokens=512,
                         enable_prefix_caching=False,
+                        model_loader_extra_config={"enable_weights_track": False},
                         async_scheduling=1)
 
         start_time = time.time()
@@ -165,6 +167,7 @@ def _test_correctness_helper(
         ref_llm = LLM(model=model_name,
                       max_model_len=1024,
                       max_num_seqs=100,
+                      model_loader_extra_config={"enable_weights_track": False},
                       async_scheduling=0)
         ref_outputs = ref_llm.generate(test_prompts, sampling_config)
 
@@ -176,6 +179,7 @@ def _test_correctness_helper(
         async_llm = LLM(model=model_name,
                         max_model_len=1024,
                         max_num_seqs=100,
+                        model_loader_extra_config={"enable_weights_track": False},
                         async_scheduling=1)
         async_outputs = async_llm.generate(test_prompts, sampling_config)
 
