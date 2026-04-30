@@ -739,10 +739,12 @@ class TPUConnectorWorker:
                 break
             time.sleep(0.001)
 
+        d2h_slice_time = (time_1 - start_time) * 1000
+        d2h_transfer_time = (end_time - time_1) * 1000
         logger.info(
-            f"Worker {self.node_id} --> Done D2H kv transfer for req_id={req_id} | slice time={(time_1 - start_time)*1000:.2f}ms | copy time={(end_time - time_1)*1000:.2f}ms"
+            f"Worker {self.node_id} --> Done D2H kv transfer for req_id={req_id} | slice time={d2h_slice_time:.2f}ms | copy time={d2h_transfer_time:.2f}ms"
         )
-        # Record
+        self.transfer_stats_accumulator.record_d2h_transfer(d2h_transfer_time)
 
         # 4. Network transfer
         self.reqs_wait_pull[req_id] = [
@@ -802,19 +804,19 @@ class TPUConnectorWorker:
                     f"uuid={req_meta.uuid} | prepare time={prepare_time_ms:.2f}ms | "
                     f"pull time={pull_time_ms:.2f}ms | size={kv_size_mb:.2f}MB"
                 )
-                # Log
+                self.transfer_stats_accumulator.record_successful_transfer(prepare_time_ms, pull_time_ms, kv_size_mb)
             else:
                 logger.warning(
                     f"Worker {self.node_id} --> kv transfer | failed to pull req_id={req_id} with in {pull_time_ms:.2f}ms | "
                     f"uuid={req_meta.uuid} | prepare time={prepare_time_ms:.2f}ms | "
                     f"size={kv_size_mb:.2f}MB")
-                # log
+                self.transfer_stats_accumulator.record_failed_transfer()
         else:
             logger.info(
                 f"Worker {self.node_id} --> kv transfer | done pull req_id={req_id} | "
                 f"uuid={req_meta.uuid} | prepare time={prepare_time_ms:.2f}ms | "
                 f"size={kv_size_mb:.2f}MB")
-            # log
+            self.transfer_stats_accumulator.record_successful_transfer(prepare_time_ms, pull_time_ms, kv_size_mb)
         return kv
 
     def _get_kv_spec(self, num_blocks: int) -> list[jax.ShapeDtypeStruct]:
