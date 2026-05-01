@@ -193,7 +193,7 @@ class VllmMultiHeadLatentAttentionWrapper(MultiHeadLatentAttentionWrapper):
         self.is_sparse = mla_modules.is_sparse
         self.skip_topk = skip_topk
 
-        if self.indexer is not None and not self.skip_topk:
+        if self.indexer is not None: #and not self.skip_topk:
             assert hasattr(self.indexer, "topk_tokens")
             self.topk_tokens = self.indexer.topk_tokens
             self.topk_indices_buffer = mla_modules.topk_indices_buffer
