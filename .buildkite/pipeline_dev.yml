@@ -49,44 +49,106 @@ steps:
     commands:
       - bash -c 'source .buildkite/scripts/setup_docker_env.sh && setup_environment "vllm-tpu" "false" "true"'
 
-  - label: "tpu7x KV Cache Offload"
-    key: tpu7x_offload
+  - label: "${TPU_VERSION:-tpu6e} Unit tests for google/gemma-4-26B-A4B-it"
+    key: "${TPU_VERSION:-tpu6e}_google_gemma-4-26B-A4B-it_UnitTest"
+    agents:
+      queue: tpu_v7x_8_queue
     depends_on: tpu7x_build_docker
     env:
       USE_PREBUILT_IMAGE: "1"
       TPU_VERSION: "tpu7x"
       NIGHTLY: "1"
-      MODEL_IMPL_TYPE: "vllm"
+      MODEL_IMPL_TYPE: "flax_nnx"
       TEST_MODE: 1
-    agents:
-      queue: tpu_v7x_8_queue
+    soft_fail: true
+    # use 'pip install "transformers>=5.5.0" --dry-run' to check if transformers 5.5.0 is satisfied.
+    # if the output contains "Would install transformers-", it means transformers 5.5.0 is not satisfied, and we should skip the test.
+    # TODO(#2333): enable on v6e
     commands:
-      - .buildkite/scripts/run_in_docker.sh python3 -m pytest -s -v /workspace/tpu_inference/tests/offload/tpu_offload_accuracy_test.py
+      - |
+        if pip install "transformers>=5.5.0" --dry-run | grep -q "Would install transformers-"; then
+          buildkite-agent meta-data set "${TPU_VERSION:-tpu6e}_google_gemma-4-26B-A4B-it_UnitTest" "transformers version too low"
+          exit 0
+        fi
+        if [ "${TPU_VERSION:-tpu6e}" = "tpu6e" ]; then
+          buildkite-agent meta-data set "${TPU_VERSION:-tpu6e}_google_gemma-4-26B-A4B-it_UnitTest" "not enough HBM"
+          exit 0
+        fi
+        .buildkite/scripts/run_in_docker.sh \
+          bash -c 'USE_BATCHED_RPA_KERNEL=1 JITTED_MM_MODULE_KEYS="model.vision_tower.encoder" REGISTER_MM_MODULE_CUSTOM_PYTREE_CLASSES="transformers.modeling_outputs.BaseModelOutputWithPast" SKIP_JAX_PRECOMPILE=1 VLLM_XLA_CHECK_RECOMPILATION=0 python /workspace/tpu_inference/examples/offline_inference.py --model google/gemma-4-26B-A4B-it --tensor-parallel-size 8 --max-num-batched-tokens 4096 --max-model-len 4096 --model-loader-extra-config "{\"enable_weights_track\": false}"'
 
-  - label: "tpu7x Multimodal Test"
-    key: tpu7x_multimodal
+  - label: "${TPU_VERSION:-tpu6e} Unit tests for google/gemma-4-31B-it"
+    key: "${TPU_VERSION:-tpu6e}_google_gemma-4-31B-it_UnitTest"
+    agents:
+      queue: tpu_v7x_8_queue
     depends_on: tpu7x_build_docker
     env:
       USE_PREBUILT_IMAGE: "1"
       TPU_VERSION: "tpu7x"
       NIGHTLY: "1"
-      MODEL_IMPL_TYPE: "vllm"
+      MODEL_IMPL_TYPE: "flax_nnx"
       TEST_MODE: 1
-    agents:
-      queue: tpu_v7x_8_queue
+    soft_fail: true
+    # use 'pip install "transformers>=5.5.0" --dry-run' to check if transformers 5.5.0 is satisfied.
+    # if the output contains "Would install transformers-", it means transformers 5.5.0 is not satisfied, and we should skip the test.
     commands:
-      - .buildkite/scripts/run_in_docker.sh python3 -m pytest -s -v /workspace/tpu_inference/tests/e2e/test_multi_modal_inference.py
+      - |
+        if pip install "transformers>=5.5.0" --dry-run | grep -q "Would install transformers-"; then
+          buildkite-agent meta-data set "${TPU_VERSION:-tpu6e}_google_gemma-4-31B-it_UnitTest" "transformers version too low"
+          exit 0
+        fi
+        .buildkite/scripts/run_in_docker.sh \
+          bash -c 'USE_BATCHED_RPA_KERNEL=1 JITTED_MM_MODULE_KEYS="model.vision_tower.encoder" REGISTER_MM_MODULE_CUSTOM_PYTREE_CLASSES="transformers.modeling_outputs.BaseModelOutputWithPast" SKIP_JAX_PRECOMPILE=1 VLLM_XLA_CHECK_RECOMPILATION=0 python /workspace/tpu_inference/examples/offline_inference.py --model google/gemma-4-31B-it --tensor-parallel-size 8 --max-num-batched-tokens 4096 --max-model-len 4096 --model-loader-extra-config "{\"enable_weights_track\": false}"'
 
-  - label: "tpu7x Speculative Decoding Eagle3"
-    key: tpu7x_speculative_eagle3
+
+  - label: "${TPU_VERSION:-tpu6e} Performance benchmarks for Qwen/Qwen3-4B"
+    key: "${TPU_VERSION:-tpu6e}_Qwen_Qwen3-4B_Benchmark"
+    depends_on: "${TPU_VERSION:-tpu6e}_record_Qwen_Qwen3-4B_Accuracy"
+    soft_fail: true
+    agents:
+      queue: tpu_v7x_8_queue
     depends_on: tpu7x_build_docker
     env:
       USE_PREBUILT_IMAGE: "1"
       TPU_VERSION: "tpu7x"
       NIGHTLY: "1"
-      MODEL_IMPL_TYPE: "vllm"
+      MODEL_IMPL_TYPE: "flax_nnx"
       TEST_MODE: 1
+      TEST_MODEL: Qwen/Qwen3-4B
+      TENSOR_PARALLEL_SIZE: "${TENSOR_PARALLEL_SIZE_SINGLE:-1}"
+      MINIMUM_THROUGHPUT_THRESHOLD: 11.00
+      INPUT_LEN: 1800
+      OUTPUT_LEN: 128
+      PREFIX_LEN: 0
+      MAX_MODEL_LEN: 2048
+      MAX_NUM_SEQS: 94
+      MAX_NUM_BATCHED_TOKENS: 4096
+    commands:
+      - |
+        .buildkite/scripts/run_in_docker.sh bash /workspace/tpu_inference/tests/e2e/benchmarking/benchmark.sh
+
+  - label: "${TPU_VERSION:-tpu6e} Performance benchmarks for Qwen/Qwen3-32B"
+    key: "${TPU_VERSION:-tpu6e}_Qwen_Qwen3-32B_Benchmark"
+    depends_on: "${TPU_VERSION:-tpu6e}_record_Qwen_Qwen3-32B_Accuracy"
+    soft_fail: true
     agents:
       queue: tpu_v7x_8_queue
+    depends_on: tpu7x_build_docker
+    env:
+      USE_PREBUILT_IMAGE: "1"
+      TPU_VERSION: "tpu7x"
+      NIGHTLY: "1"
+      MODEL_IMPL_TYPE: "flax_nnx"
+      TEST_MODE: 1
+      TEST_MODEL: Qwen/Qwen3-32B
+      TENSOR_PARALLEL_SIZE: "${TENSOR_PARALLEL_SIZE_MULTI:-8}"
+      MINIMUM_THROUGHPUT_THRESHOLD: 12.46
+      INPUT_LEN: 1800
+      OUTPUT_LEN: 128
+      PREFIX_LEN: 0
+      MAX_MODEL_LEN: 2048
+      MAX_NUM_SEQS: 512
+      MAX_NUM_BATCHED_TOKENS: 4096
     commands:
-      - .buildkite/scripts/run_in_docker.sh python3 -m pytest -s -v /workspace/tpu_inference/tests/e2e/test_speculative_decoding.py::test_eagle3_correctness
+      - |
+        .buildkite/scripts/run_in_docker.sh bash /workspace/tpu_inference/tests/e2e/benchmarking/benchmark.sh
