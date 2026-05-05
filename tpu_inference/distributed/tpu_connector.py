@@ -76,11 +76,7 @@ from vllm.config import VllmConfig
 from vllm.distributed.kv_transfer.kv_connector.v1.base import (
     KVConnectorBase_V1, KVConnectorMetadata, KVConnectorRole)
 from vllm.distributed.kv_transfer.kv_connector.v1.metrics import (
-    KVConnectorPromMetrics,
-    KVConnectorStats,
-    PromMetric,
-    PromMetricT,
-)
+    KVConnectorPromMetrics, KVConnectorStats, PromMetric, PromMetricT)
 from vllm.utils.math_utils import round_down
 from vllm.utils.network_utils import make_zmq_path, make_zmq_socket
 from vllm.v1.core.sched.output import SchedulerOutput
@@ -95,7 +91,8 @@ from tpu_inference import envs
 from tpu_inference.distributed.host_kv_pool import HostKVPool
 from tpu_inference.distributed.kv_transfer import (copy_to_host,
                                                    multi_layer_copy)
-from tpu_inference.distributed.tpu_connector_stats import (TpuKVConnectorStats, TpuKVConnectorPromMetrics)
+from tpu_inference.distributed.tpu_connector_stats import (
+    TpuKVConnectorPromMetrics, TpuKVConnectorStats)
 from tpu_inference.logger import init_logger
 from tpu_inference.runner.tpu_runner import TPUModelRunner
 from tpu_inference.utils import device_array
@@ -240,13 +237,10 @@ class TPUConnector(KVConnectorBase_V1):
 
     @classmethod
     def build_kv_connector_stats(
-        cls, data: dict[str, Any] | None = None
-    ) -> KVConnectorStats | None:
-        return (
-            TpuKVConnectorStats(data=data)
-            if data is not None
-            else TpuKVConnectorStats()
-        )
+            cls,
+            data: dict[str, Any] | None = None) -> KVConnectorStats | None:
+        return (TpuKVConnectorStats(
+            data=data) if data is not None else TpuKVConnectorStats())
 
     @classmethod
     def build_prom_metrics(
@@ -256,9 +250,8 @@ class TPUConnector(KVConnectorBase_V1):
         labelnames: list[str],
         per_engine_labelvalues: dict[int, list[object]],
     ) -> KVConnectorPromMetrics:
-        return TpuKVConnectorPromMetrics(
-            vllm_config, metric_types, labelnames, per_engine_labelvalues
-        )
+        return TpuKVConnectorPromMetrics(vllm_config, metric_types, labelnames,
+                                         per_engine_labelvalues)
 
 
 class TPUConnectorScheduler():
@@ -753,7 +746,8 @@ class TPUConnectorWorker:
         logger.info(
             f"Worker {self.node_id} --> Done D2H kv transfer for req_id={req_id} | slice time={d2h_slice_time:.2f}ms | copy time={d2h_transfer_time:.2f}ms"
         )
-        self.transfer_stats.record_d2h_transfer(d2h_slice_time, d2h_transfer_time)
+        self.transfer_stats.record_d2h_transfer(d2h_slice_time,
+                                                d2h_transfer_time)
 
         # 4. Network transfer
         self.reqs_wait_pull[req_id] = [
@@ -813,7 +807,8 @@ class TPUConnectorWorker:
                     f"uuid={req_meta.uuid} | prepare time={prepare_time_ms:.2f}ms | "
                     f"pull time={pull_time_ms:.2f}ms | size={kv_size_mb:.2f}MB"
                 )
-                self.transfer_stats.record_successful_transfer(prepare_time_ms, pull_time_ms, kv_size_mb)
+                self.transfer_stats.record_successful_transfer(
+                    prepare_time_ms, pull_time_ms, kv_size_mb)
             else:
                 logger.warning(
                     f"Worker {self.node_id} --> kv transfer | failed to pull req_id={req_id} with in {pull_time_ms:.2f}ms | "
@@ -825,7 +820,8 @@ class TPUConnectorWorker:
                 f"Worker {self.node_id} --> kv transfer | done pull req_id={req_id} | "
                 f"uuid={req_meta.uuid} | prepare time={prepare_time_ms:.2f}ms | "
                 f"size={kv_size_mb:.2f}MB")
-            self.transfer_stats.record_successful_transfer(prepare_time_ms, pull_time_ms, kv_size_mb)
+            self.transfer_stats.record_successful_transfer(
+                prepare_time_ms, pull_time_ms, kv_size_mb)
         return kv
 
     def _get_kv_spec(self, num_blocks: int) -> list[jax.ShapeDtypeStruct]:

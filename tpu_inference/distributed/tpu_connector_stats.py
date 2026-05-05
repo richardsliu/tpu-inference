@@ -1,3 +1,16 @@
+# Copyright 2026 Google LLC
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
 """Stats and Prometheus metrics for the TPU KV connector."""
 
 import copy
@@ -5,14 +18,9 @@ from dataclasses import dataclass
 from typing import Any
 
 import numpy as np
-
 from vllm.config import VllmConfig
 from vllm.distributed.kv_transfer.kv_connector.v1.metrics import (
-    KVConnectorPromMetrics,
-    KVConnectorStats,
-    PromMetric,
-    PromMetricT,
-)
+    KVConnectorPromMetrics, KVConnectorStats, PromMetric, PromMetricT)
 from vllm.v1.metrics.utils import create_metric_per_engine
 
 
@@ -25,16 +33,13 @@ class TpuKVConnectorStats(KVConnectorStats):
             # Empty container init, no data is passed in.
             self.reset()
 
-    def record_host_dram_allocation(self, host_dram_allocation_time):
-        """Record a Host DRAM KV pool allocation."""
-        self.data["host_dram_allocation_time"] = host_dram_allocation_time
-
     def record_d2h_transfer(self, d2h_slice_time, d2h_transfer_time):
         """Record a D2H transfer operation."""
         self.data["d2h_slice_time"].append(d2h_slice_time)
         self.data["d2h_transfer_time"].append(d2h_transfer_time)
 
-    def record_successful_transfer(self, prepare_time, transfer_time, mb_transferred):
+    def record_successful_transfer(self, prepare_time, transfer_time,
+                                   mb_transferred):
         """Record a successful TPU KV transfer operation."""
         self.data["prepare_time"].append(prepare_time)
         self.data["transfer_time"].append(transfer_time)
@@ -47,7 +52,6 @@ class TpuKVConnectorStats(KVConnectorStats):
     def reset(self):
         # Must be serializable
         self.data: dict[str, list[float | int]] = {
-            "host_dram_allocation_time": [],
             "d2h_slice_time": [],
             "d2h_transfer_time": [],
             "prepare_time": [],
@@ -70,7 +74,6 @@ class TpuKVConnectorStats(KVConnectorStats):
         return self
 
     def reduce(self) -> dict[str, int | float]:
-        host_dram_allocation_time = np.asarray(self.data["host_dram_allocation_time"])
         d2h_slice_time = np.asarray(self.data["d2h_slice_time"])
         d2h_transfer_time = np.asarray(self.data["d2h_transfer_time"])
         prepare_time = np.asarray(self.data["prepare_time"])
@@ -84,29 +87,43 @@ class TpuKVConnectorStats(KVConnectorStats):
         throughput_mb_s = total_mb / total_time_seconds if total_time_seconds > 0 else 0
 
         return {
-            "Avg D2H slice time (ms)": round(d2h_slice_time.mean(), 3) if d2h_slice_time.size > 0 else 0.0,
-            "P90 D2H slice time (ms)": round(np.percentile(d2h_slice_time, 90).item(), 3) if d2h_slice_time.size > 0 else 0.0,
-            "Avg D2H transfer time (ms)": round(d2h_transfer_time.mean(), 3) if d2h_transfer_time.size > 0 else 0.0,
-            "P90 D2H transfer time (ms)": round(np.percentile(d2h_transfer_time, 90).item(), 3) if d2h_transfer_time.size > 0 else 0.0,
-            "Num successful transfers": self.num_successful_transfers,
-            "Num failed transfers": self.data['num_failed_transfers'],
-            "Avg KV transfer prepare time (ms)": round(prepare_time.mean(), 3) if prepare_time.size > 0 else 0.0,
-            "P90 KV transfer prepare time (ms)": round(np.percentile(prepare_time, 90).item(), 3) if prepare_time.size > 0 else 0.0,
-            "Avg KV transfer time (ms)": round(transfer_time.mean(), 3) if transfer_time.size > 0 else 0.0,
-            "P90 KV transfer time (ms)": round(np.percentile(transfer_time, 90).item(), 3) if transfer_time.size > 0 else 0.0,
-            "Avg MB per transfer": round(avg_mb, 3),
-            "Throughput (MB/s)": round(throughput_mb_s, 3),
+            "Avg D2H slice time (ms)":
+            round(d2h_slice_time.mean(), 3)
+            if d2h_slice_time.size > 0 else 0.0,
+            "P90 D2H slice time (ms)":
+            round(np.percentile(d2h_slice_time, 90).item(), 3)
+            if d2h_slice_time.size > 0 else 0.0,
+            "Avg D2H transfer time (ms)":
+            round(d2h_transfer_time.mean(), 3)
+            if d2h_transfer_time.size > 0 else 0.0,
+            "P90 D2H transfer time (ms)":
+            round(np.percentile(d2h_transfer_time, 90).item(), 3)
+            if d2h_transfer_time.size > 0 else 0.0,
+            "Num successful transfers":
+            self.num_successful_transfers,
+            "Num failed transfers":
+            self.data['num_failed_transfers'],
+            "Avg KV transfer prepare time (ms)":
+            round(prepare_time.mean(), 3) if prepare_time.size > 0 else 0.0,
+            "P90 KV transfer prepare time (ms)":
+            round(np.percentile(prepare_time, 90).item(), 3)
+            if prepare_time.size > 0 else 0.0,
+            "Avg KV transfer time (ms)":
+            round(transfer_time.mean(), 3) if transfer_time.size > 0 else 0.0,
+            "P90 KV transfer time (ms)":
+            round(np.percentile(transfer_time, 90).item(), 3)
+            if transfer_time.size > 0 else 0.0,
+            "Avg MB per transfer":
+            round(avg_mb, 3),
+            "Throughput (MB/s)":
+            round(throughput_mb_s, 3),
         }
 
     def is_empty(self) -> bool:
-        return (
-            len(self.data["host_dram_allocation_time"]) == 0
-            and len(self.data["d2h_slice_time"]) == 0
-            and len(self.data["d2h_transfer_time"]) == 0
-            and self.data["num_successful_transfers"] == 0
-            and len(self.data["num_failed_transfers"]) == 0
-        )
-
+        return (len(self.data["d2h_slice_time"]) == 0
+                and len(self.data["d2h_transfer_time"]) == 0
+                and self.data["num_successful_transfers"] == 0
+                and len(self.data["num_failed_transfers"]) == 0)
 
     @property
     def num_successful_transfers(self) -> int:
@@ -114,6 +131,7 @@ class TpuKVConnectorStats(KVConnectorStats):
 
 
 class TpuKVConnectorPromMetrics(KVConnectorPromMetrics):
+
     def __init__(
         self,
         vllm_config: VllmConfig,
@@ -121,10 +139,11 @@ class TpuKVConnectorPromMetrics(KVConnectorPromMetrics):
         labelnames: list[str],
         per_engine_labelvalues: dict[int, list[object]],
     ):
-        super().__init__(vllm_config, metric_types, labelnames, per_engine_labelvalues)
+        super().__init__(vllm_config, metric_types, labelnames,
+                         per_engine_labelvalues)
 
         # Buckets for time-based metrics in milliseconds
-        buckets=[
+        buckets = [
             1.0,
             10.0,
             100.0,
@@ -141,40 +160,40 @@ class TpuKVConnectorPromMetrics(KVConnectorPromMetrics):
         ]
         tpu_histogram_d2h_slice_time = self._histogram_cls(
             name="vllm:tpu_d2h_slice_time_ms",
-            documentation="Histogram of D2H slice duration for TPU KV Cache transfers.",
+            documentation=
+            "Histogram of D2H slice duration for TPU KV Cache transfers.",
             buckets=buckets[1:],
             labelnames=labelnames,
         )
         self.tpu_histogram_d2h_slice_time = create_metric_per_engine(
-            tpu_histogram_d2h_slice_time, self.per_engine_labelvalues
-        )
+            tpu_histogram_d2h_slice_time, self.per_engine_labelvalues)
         tpu_histogram_d2h_transfer_time = self._histogram_cls(
             name="vllm:tpu_d2h_transfer_time_ms",
-            documentation="Histogram of D2H transfer duration for TPU KV Cache transfers.",
+            documentation=
+            "Histogram of D2H transfer duration for TPU KV Cache transfers.",
             buckets=buckets[1:],
             labelnames=labelnames,
         )
         self.tpu_histogram_d2h_transfer_time = create_metric_per_engine(
-            tpu_histogram_d2h_transfer_time, self.per_engine_labelvalues
-        )
+            tpu_histogram_d2h_transfer_time, self.per_engine_labelvalues)
         tpu_histogram_kv_prepare_time = self._histogram_cls(
             name="vllm:tpu_kv_prepare_time_ms",
-            documentation="Histogram of prepare duration for TPU KV Cache transfers.",
+            documentation=
+            "Histogram of prepare duration for TPU KV Cache transfers.",
             buckets=buckets[1:],
             labelnames=labelnames,
         )
         self.tpu_histogram_kv_prepare_time = create_metric_per_engine(
-            tpu_histogram_kv_prepare_time, self.per_engine_labelvalues
-        )
+            tpu_histogram_kv_prepare_time, self.per_engine_labelvalues)
         tpu_histogram_kv_transfer_time = self._histogram_cls(
             name="vllm:tpu_kv_transfer_time_ms",
-            documentation="Histogram of transfer duration for TPU KV Cache transfers.",
+            documentation=
+            "Histogram of transfer duration for TPU KV Cache transfers.",
             buckets=buckets[1:],
             labelnames=labelnames,
         )
         self.tpu_histogram_kv_transfer_time = create_metric_per_engine(
-            tpu_histogram_kv_transfer_time, self.per_engine_labelvalues
-        )
+            tpu_histogram_kv_transfer_time, self.per_engine_labelvalues)
         # Buckets for data transferred
         buckets = [
             32,
@@ -188,23 +207,25 @@ class TpuKVConnectorPromMetrics(KVConnectorPromMetrics):
         ]
         tpu_histogram_kv_megabytes_transferred = self._histogram_cls(
             name="vllm:tpu_kv_megabytes_transferred",
-            documentation="Histogram of megabytes transferred per TPU KV Cache transfers.",
+            documentation=
+            "Histogram of megabytes transferred per TPU KV Cache transfers.",
             buckets=buckets,
             labelnames=labelnames,
         )
         self.tpu_histogram_kv_megabytes_transferred = create_metric_per_engine(
-            tpu_histogram_kv_megabytes_transferred, self.per_engine_labelvalues
-        )
+            tpu_histogram_kv_megabytes_transferred,
+            self.per_engine_labelvalues)
         counter_tpu_num_failed_transfers = self._counter_cls(
             name="vllm:tpu_num_failed_transfers",
             documentation="Number of failed TPU KV Cache transfers.",
             labelnames=labelnames,
         )
         self.counter_tpu_num_failed_transfers = create_metric_per_engine(
-            counter_tpu_num_failed_transfers, self.per_engine_labelvalues
-        )
+            counter_tpu_num_failed_transfers, self.per_engine_labelvalues)
 
-    def observe(self, transfer_stats_data: dict[str, Any], engine_idx: int = 0):
+    def observe(self,
+                transfer_stats_data: dict[str, Any],
+                engine_idx: int = 0):
         for prom_obj, list_item_key in zip(
             [
                 self.tpu_histogram_d2h_slice_time,
