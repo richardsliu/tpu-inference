@@ -753,7 +753,7 @@ class TPUConnectorWorker:
         logger.info(
             f"Worker {self.node_id} --> Done D2H kv transfer for req_id={req_id} | slice time={d2h_slice_time:.2f}ms | copy time={d2h_transfer_time:.2f}ms"
         )
-        self.transfer_stats.record_d2h_transfer(d2h_transfer_time)
+        self.transfer_stats.record_d2h_transfer(d2h_slice_time, d2h_transfer_time)
 
         # 4. Network transfer
         self.reqs_wait_pull[req_id] = [
