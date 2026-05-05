@@ -54,6 +54,11 @@ class TpuKVConnectorStats(KVConnectorStats):
             "num_failed_transfers": [],
         }
 
+    def clone_and_reset(self) -> "TpuKVConnectorStats":
+        old = copy.copy(self)
+        self.reset()
+        return old
+
     def aggregate(self, other: "KVConnectorStats") -> "KVConnectorStats":
         if not other.is_empty():
             for k, v in other.data.items():
