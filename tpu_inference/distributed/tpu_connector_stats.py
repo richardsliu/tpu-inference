@@ -87,9 +87,9 @@ class TpuKVConnectorStats(KVConnectorStats):
 
     def is_empty(self) -> bool:
         return (
-            self.host_dram_allocation_time == 0
-            and self.d2h_transfer_time == 0
-            and self.num_successful_transfers == 0
+            self.data["host_dram_allocation_time"] == 0
+            and self.data["d2h_transfer_time"] == 0
+            and self.data["num_successful_transfers"] == 0
             and len(self.data["num_failed_transfers"]) == 0
         )
 
