@@ -37,8 +37,6 @@ if TYPE_CHECKING:
     JAX_PROFILER_SERVER_PORT: int = 9999
     USE_BATCHED_RPA_KERNEL: bool = False
     FORCE_MOE_RANDOM_ROUTING: bool = False
-    SC_KERNEL_THRESHOLD: int = 16777216
-    SC_KERNEL_COL_CHUNK_SIZE: int = 1024
     JITTED_MM_MODULE_KEYS: list[str] = []
     REGISTER_MM_MODULE_CUSTOM_PYTREE_CLASSES: list[str] = []
     RAGGED_GATED_DELTA_RULE_IMPL: str = "ragged_gated_delta_rule_chunked"
@@ -51,6 +49,7 @@ if TYPE_CHECKING:
     TPU_OFFLOAD_SAVE_THREADS: int = 1
     TPU_OFFLOAD_BATCHED_SAVE: bool = False
     TPU_OFFLOAD_METRICS_LOG_INTERVAL: int = 5
+    TPU_OFFLOAD_USE_UNPINNED_HOST: bool = False
 
 
 def env_with_choices(
@@ -245,10 +244,6 @@ environment_variables: dict[str, Callable[[], Any]] = {
     # Force random expert routing in MoE layers (for testing purposes only)
     "FORCE_MOE_RANDOM_ROUTING":
     env_bool("FORCE_MOE_RANDOM_ROUTING", default=False),
-    "SC_KERNEL_THRESHOLD":
-    lambda: int(os.getenv("SC_KERNEL_THRESHOLD") or "16777216"),
-    "SC_KERNEL_COL_CHUNK_SIZE":
-    lambda: int(os.getenv("SC_KERNEL_COL_CHUNK_SIZE") or "3072"),
     "JITTED_MM_MODULE_KEYS":
     env_str_list("JITTED_MM_MODULE_KEYS"),
     "REGISTER_MM_MODULE_CUSTOM_PYTREE_CLASSES":
@@ -288,6 +283,9 @@ environment_variables: dict[str, Callable[[], Any]] = {
     # kv offload to dram: prometheus metrics log interval in seconds
     "TPU_OFFLOAD_METRICS_LOG_INTERVAL":
     lambda: int(os.getenv("TPU_OFFLOAD_METRICS_LOG_INTERVAL", "10")),
+    # kv offload to dram: Whether to use unpinned_host for KV cache tensors on host dram.
+    "TPU_OFFLOAD_USE_UNPINNED_HOST":
+    lambda: bool(int(os.getenv("TPU_OFFLOAD_USE_UNPINNED_HOST", "0"))),
 }
 
 
