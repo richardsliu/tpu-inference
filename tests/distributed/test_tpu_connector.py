@@ -15,10 +15,13 @@
 import unittest
 from unittest.mock import MagicMock, patch
 
+import numpy as np
 from vllm.distributed.kv_transfer.kv_connector.v1.base import KVConnectorRole
 from vllm.v1.request import RequestStatus
 
 from tpu_inference.distributed import tpu_connector
+from tpu_inference.distributed.tpu_connector_stats import (
+    TpuKVConnectorPromMetrics, TpuKVConnectorStats)
 
 
 class MockVllmConfig:
@@ -521,12 +524,56 @@ class TestTPUConnectorUtils(unittest.TestCase):
         mock_multi_layer_copy.assert_called_once()
         _, kwargs = mock_multi_layer_copy.call_args
 
-        import numpy as np
         self.assertEqual(kwargs['dest_offsets'].shape[0], 9)
         np.testing.assert_array_equal(kwargs['dest_offsets'][:3], [5, 10, 17])
         self.assertEqual(kwargs['chunk_sizes'].shape[0], 9)
         np.testing.assert_array_equal(kwargs['chunk_sizes'][:3], [4, 2, 3])
         np.testing.assert_array_equal(kwargs['num_chunks'], [3])
+
+
+class TestTPUConnectorStats(unittest.TestCase):
+
+    def test_tpu_stats_aggregationn(self):
+        stats = TpuKVConnectorStats()
+
+        reduced = stats.reduce()
+        assert reduced["Avg D2H transfer time (ms)"] == 0.0
+        assert reduced["Throughput (MB/s)"] == 0.0
+        assert stats.is_empty() is True
+
+        stats.record_d2h_transfer(d2h_slice_time=100.0,
+                                  d2h_transfer_time=200.0)
+        stats.record_d2h_transfer(d2h_slice_time=120.0,
+                                  d2h_transfer_time=300.0)
+        stats.record_successful_transfer(prepare_time=30.0,
+                                         transfer_time=400.0,
+                                         mb_transferred=50.0)
+        stats.record_successful_transfer(prepare_time=50.0,
+                                         transfer_time=500.0,
+                                         mb_transferred=50.0)
+        stats.record_failed_transfer()
+
+        reduced = stats.reduce()
+
+        assert reduced["Avg D2H slice time (ms)"] == 100.0
+        assert reduced["Avg MB per transfer"] == 50.0
+        assert reduced["Throughput (MB/s)"] == 100.0
+        assert stats.is_empty() is False
+
+    def test_prometheus_observation():
+        metrics = TpuKVConnectorPromMetrics(vllm_config=MagicMock(),
+                                            labelnames=["model_name"])
+
+        mock_data = {
+            "d2h_slice_time": [10.5, 20.5],
+            "d2h_transfer_time": [100.0, 200.0],
+            "prepare_time": [5.0, 5.0],
+            "transfer_time": [1000.0, 1000.0],
+            "mb_transferred": [256.0, 256.0],
+        }
+
+        # Should not raise any errors
+        metrics.observe(mock_data, engine_idx=0)
 
 
 if __name__ == "__main__":
