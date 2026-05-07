@@ -148,10 +148,11 @@ class CompilationManager:
             input_sharding = NamedSharding(
                 self.runner.mesh, PartitionSpec(ShardingAxisName.ATTN_DATA))
 
-            dummy_multimodal_embeddings = self._create_dummy_tensor(
+            dummy_mm_embeds = self._create_dummy_tensor(
                 (num_tokens, hidden_size),
                 self.runner.vllm_config.model_config.dtype,
                 sharding=sharding)
+            dummy_multimodal_embeddings = [dummy_mm_embeds]
             dummy_input_ids = self._create_dummy_tensor(
                 (num_tokens, ), jnp.int32, sharding=input_sharding)
             dummy_is_multimodal = self._create_dummy_tensor(
@@ -770,20 +771,10 @@ class CompilationManager:
                                     block_tables,
                                     sharding=PartitionSpec(None, ))
 
-        selected_positions = self._create_dummy_tensor(
-            (self.runner.max_num_reqs, ), jnp.int32)
         seq_lens = self._create_dummy_tensor((self.runner.max_num_reqs, ),
                                              jnp.int32)
         query_start_loc = self._create_dummy_tensor(
             (self.runner.max_num_reqs + 1, ), jnp.int32)
-        self._run_compilation(
-            "_update_inputs_for_loop_speculation for the first loop",
-            self.runner.drafter._update_inputs_for_loop_speculation,
-            selected_positions, seq_lens, block_tables)
-        self._run_compilation(
-            "_update_inputs_for_loop_speculation for the subsequent loops",
-            self.runner.drafter._update_inputs_for_loop_speculation,
-            selected_positions, seq_lens, block_tables)
 
         request_distribution = np.array([0, 0, 0], dtype=np.int32)
         request_distribution = device_array(self.runner.mesh,
@@ -804,52 +795,11 @@ class CompilationManager:
         else:
             eagle3_mamba_state_indices = None
 
-        for num_reqs_padding in self.runner.num_reqs_paddings:
-            for i in range(1, self.runner.drafter.num_speculative_tokens + 1):
-                draft_token_ids_list = [
-                    self._create_dummy_tensor(
-                        (num_reqs_padding, ), jnp.int32,
-                        NamedSharding(self.runner.mesh, PartitionSpec()))
-                    for _ in range(i)
-                ]
-                self._run_compilation(
-                    "eagle3_stack_draft_token_ids",
-                    self.runner.drafter._stack_draft_token_ids,
-                    draft_token_ids_list,
-                    num_reqs=num_reqs_padding,
-                    draft_token_ids_list_length=len(draft_token_ids_list))
-
-        for num_logits in self.runner.num_logits_paddings:
-            hidden_states = self._create_dummy_tensor(
-                (num_logits, draft_hidden_size), jnp.bfloat16)
-            self._run_compilation(
-                "eagle3_get_draft_token_ids",
-                self.runner.drafter._get_draft_token_ids,
-                self.runner.drafter.state,
-                hidden_states,
-                num_logits=num_logits,
-            )
-
-        input_ids_loop = self._create_dummy_tensor(
-            (self.runner.max_num_reqs, ), jnp.int32,
-            NamedSharding(self.runner.mesh, PartitionSpec()))
-        draft_hidden_state_loop = self._create_dummy_tensor(
-            (self.runner.max_num_reqs, draft_hidden_size), dtype,
-            NamedSharding(self.runner.mesh, PartitionSpec(None, None)))
         next_token_ids = self._create_dummy_tensor(
             (self.runner.max_num_reqs, ), jnp.int32)
         last_token_indices = self._create_dummy_tensor(
             (self.runner.max_num_reqs, ), jnp.int32)
         for num_tokens in self.runner.num_tokens_paddings:
-            aux_hidden_states = [
-                self._create_dummy_tensor((num_tokens, target_hidden_size),
-                                          dtype),
-                self._create_dummy_tensor((num_tokens, target_hidden_size),
-                                          dtype),
-                self._create_dummy_tensor((num_tokens, target_hidden_size),
-                                          dtype),
-            ]
-
             positions = self._create_dummy_tensor((num_tokens, ), jnp.int32)
             attention_metadata = AttentionMetadata(
                 input_positions=positions,
@@ -860,74 +810,24 @@ class CompilationManager:
                 mamba_state_indices=eagle3_mamba_state_indices,
             )
 
-            def filter_token_and_prepare_initial_inputs_wrapper(
-                token_indices,
-                query_start_loc,
-                seq_lens,
-                input_ids,
-                aux_hidden_states,
-                attention_metadata,
-                next_token_ids,
-                num_reqs,
-            ):
-                target_hidden_states, input_ids, last_token_indices, _ = self.runner.drafter._filter_token_and_prepare_initial_inputs(
-                    self.runner.drafter.state, token_indices, query_start_loc,
-                    seq_lens, input_ids, aux_hidden_states, attention_metadata,
-                    next_token_ids, num_reqs)
-                return target_hidden_states, input_ids, last_token_indices
-
             input_ids = self._create_dummy_tensor((num_tokens, ), jnp.int32)
-            aux_hidden_states = [
-                self._create_dummy_tensor(
-                    (num_tokens, target_hidden_size), jnp.bfloat16,
-                    NamedSharding(self.runner.mesh, PartitionSpec(None,
-                                                                  None))),
-                self._create_dummy_tensor(
-                    (num_tokens, target_hidden_size), jnp.bfloat16,
-                    NamedSharding(self.runner.mesh, PartitionSpec(None,
-                                                                  None))),
-                self._create_dummy_tensor(
-                    (num_tokens, target_hidden_size), jnp.bfloat16,
-                    NamedSharding(self.runner.mesh, PartitionSpec(None,
-                                                                  None))),
-            ]
-            # TODO(ranlihao): This will increase the precompilation latency. Find proper range for token_indices.
-            for padded_total_num_tokens in [
-                    num_tokens,
-                    min(num_tokens * 2, self.runner.num_tokens_paddings[-1])
-            ]:
-                token_indices = self._create_dummy_tensor(
-                    (padded_total_num_tokens, ), jnp.int32)
-                self._run_compilation(
-                    "eagle3_filter_token_and_prepare_initial_inputs",
-                    filter_token_and_prepare_initial_inputs_wrapper,
-                    token_indices,
-                    query_start_loc,
-                    seq_lens,
-                    input_ids,
-                    aux_hidden_states,
-                    attention_metadata,
-                    next_token_ids,
-                    device_array(
-                        self.runner.mesh,
-                        np.asarray([self.runner.input_batch.num_reqs],
-                                   dtype=jnp.int32)),
-                    num_tokens=num_tokens,
-                )
 
-            def draft_model_fn_wrapper(
-                state,
+            def drafter_propose_fn_wrapper(
                 kv_caches,
                 input_ids,
-                draft_hidden_states,
-                attention_metadata,
-                layer_name_to_kvcache_index,
+                attn_metadata,
+                last_token_indices,
+                target_hidden_states,
             ):
-                kv_caches, hidden_states, _, _ = self.runner.drafter.model_fn(
-                    state, kv_caches, input_ids, draft_hidden_states,
-                    attention_metadata, layer_name_to_kvcache_index)
+                kv_caches, draft_token_ids = self.runner.drafter.propose(
+                    kv_caches,
+                    input_ids,
+                    attn_metadata,
+                    last_token_indices,
+                    target_hidden_states,
+                )
                 self.runner.kv_caches = kv_caches
-                return hidden_states
+                return draft_token_ids
 
             draft_hidden_states = self._create_dummy_tensor(
                 (num_tokens, draft_hidden_size), dtype,
@@ -939,75 +839,45 @@ class CompilationManager:
                 (num_tokens, ), jnp.int32,
                 NamedSharding(self.runner.mesh, PartitionSpec()))
             self._run_compilation(
-                "eagle3_draft_model_fn",
-                draft_model_fn_wrapper,
-                self.runner.drafter.state,
+                "drafter_propose",
+                drafter_propose_fn_wrapper,
                 self.runner.kv_caches,
                 input_ids,
+                attention_metadata,
+                last_token_indices,
                 draft_hidden_states,
-                attention_metadata,
-                tuple(self.runner.layer_name_to_kvcache_index.items()),
-                num_tokens=num_tokens,
-            )
-            target_token_ids = self._create_dummy_tensor((num_tokens, ),
-                                                         jnp.int32)
-
-            self._run_compilation(
-                "eagle3_prepare_hidden_states_and_input_ids",
-                self.runner.drafter._prepare_hidden_states_and_input_ids,
-                self.runner.drafter.state,
-                aux_hidden_states,
-                query_start_loc,
-                target_token_ids,
-                next_token_ids,
-                device_array(
-                    self.runner.mesh,
-                    np.asarray([self.runner.input_batch.num_reqs],
-                               dtype=jnp.int32)),
                 num_tokens=num_tokens,
             )
 
-            attention_metadata.query_start_loc = device_array(
-                self.runner.mesh,
-                attention_metadata.query_start_loc,
-                sharding=PartitionSpec())
-            attention_metadata.input_positions = self._create_dummy_tensor(
-                (self.runner.max_num_reqs, ), jnp.int32)
-            self._run_compilation(
-                "draft_model_fn in a loop",
-                draft_model_fn_wrapper,
-                self.runner.drafter.state,
-                self.runner.kv_caches,
-                input_ids_loop,
-                draft_hidden_state_loop,
-                attention_metadata,
-                tuple(self.runner.layer_name_to_kvcache_index.items()),
-                num_tokens=num_tokens,
-            )
-
-            hidden_states = self._create_dummy_tensor(
-                (num_tokens, draft_hidden_size), jnp.bfloat16,
-                NamedSharding(self.runner.mesh, PartitionSpec(None, None)))
-
-            self._run_compilation(
-                "eagle3_select_inputs_for_loop_speculation",
-                self.runner.drafter._select_inputs_for_loop_speculation,
-                self.runner.drafter.state,
-                positions,
-                hidden_states,
-                hidden_states,
-                last_token_indices,
-                num_tokens=num_tokens,
-            )
-
-            self._run_compilation(
-                "eagle3_select_draft_token_ids",
-                self.runner.drafter._select_draft_token_ids,
-                self.runner.drafter.state,
-                hidden_states,
-                last_token_indices,
-                num_tokens=num_tokens,
-            )
+            for num_rejected_tokens in [
+                    None,
+                    self._create_dummy_tensor((self.runner.max_num_reqs, ),
+                                              jnp.int32)
+            ]:
+                aux_hidden_states = [
+                    self._create_dummy_tensor(
+                        (num_tokens, target_hidden_size), jnp.bfloat16,
+                        NamedSharding(self.runner.mesh,
+                                      PartitionSpec(None, None))),
+                    self._create_dummy_tensor(
+                        (num_tokens, target_hidden_size), jnp.bfloat16,
+                        NamedSharding(self.runner.mesh,
+                                      PartitionSpec(None, None))),
+                    self._create_dummy_tensor(
+                        (num_tokens, target_hidden_size), jnp.bfloat16,
+                        NamedSharding(self.runner.mesh,
+                                      PartitionSpec(None, None))),
+                ]
+                self._run_compilation(
+                    "drafter_prepare_inputs",
+                    self.runner.drafter.prepare_inputs,
+                    attention_metadata,
+                    input_ids,
+                    aux_hidden_states,
+                    next_token_ids,
+                    num_rejected_tokens,
+                    num_tokens=num_tokens,
+                )
 
     def _precompile_structured_decoding(self) -> None:
         logger.info(
