@@ -560,7 +560,7 @@ class TestTPUConnectorStats(unittest.TestCase):
         assert reduced["Throughput (MB/s)"] == 100.0
         assert stats.is_empty() is False
 
-    def test_prometheus_observation():
+    def test_prometheus_observation(self):
         metrics = TpuKVConnectorPromMetrics(vllm_config=MagicMock(),
                                             labelnames=["model_name"])
 
