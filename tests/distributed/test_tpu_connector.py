@@ -16,6 +16,7 @@ import unittest
 from unittest.mock import MagicMock, patch
 
 import numpy as np
+from prometheus_client import Counter, Gauge, Histogram
 from vllm.distributed.kv_transfer.kv_connector.v1.base import KVConnectorRole
 from vllm.v1.request import RequestStatus
 
@@ -533,47 +534,123 @@ class TestTPUConnectorUtils(unittest.TestCase):
 
 class TestTPUConnectorStats(unittest.TestCase):
 
-    def test_tpu_stats_aggregationn(self):
+    def test_tpu_stats_aggregation_d2h_transfer(self):
         stats = TpuKVConnectorStats()
 
         reduced = stats.reduce()
+        assert reduced["Avg D2H slice time (ms)"] == 0.0
+        assert reduced["P90 D2H slice time (ms)"] == 0.0
         assert reduced["Avg D2H transfer time (ms)"] == 0.0
-        assert reduced["Throughput (MB/s)"] == 0.0
+        assert reduced["P90 D2H transfer time (ms)"] == 0.0
         assert stats.is_empty() is True
 
-        stats.record_d2h_transfer(d2h_slice_time=100.0,
-                                  d2h_transfer_time=200.0)
-        stats.record_d2h_transfer(d2h_slice_time=120.0,
-                                  d2h_transfer_time=300.0)
-        stats.record_successful_transfer(prepare_time=30.0,
-                                         transfer_time=400.0,
-                                         mb_transferred=50.0)
-        stats.record_successful_transfer(prepare_time=50.0,
-                                         transfer_time=500.0,
-                                         mb_transferred=50.0)
-        stats.record_failed_transfer()
-
+        for i in range(10):
+            stats.record_d2h_transfer(d2h_slice_time=100.0 + i,
+                                      d2h_transfer_time=200.0 + i)
         reduced = stats.reduce()
 
-        assert reduced["Avg D2H slice time (ms)"] == 100.0
-        assert reduced["Avg MB per transfer"] == 50.0
-        assert reduced["Throughput (MB/s)"] == 100.0
+        assert reduced["Avg D2H slice time (ms)"] == 104.5
+        assert reduced["P90 D2H slice time (ms)"] == 108.1
+        assert reduced["Avg D2H transfer time (ms)"] == 204.5
+        assert reduced["P90 D2H transfer time (ms)"] == 208.1
+        assert stats.is_empty() is False
+
+    def test_tpu_stats_aggregation_successful_transfer(self):
+        stats = TpuKVConnectorStats()
+
+        reduced = stats.reduce()
+        assert reduced["Avg KV transfer prepare time (ms)"] == 0.0
+        assert reduced["P90 KV transfer prepare time (ms)"] == 0.0
+        assert reduced["Avg KV transfer time (ms)"] == 0.0
+        assert reduced["P90 KV transfer time (ms)"] == 0.0
+        assert reduced["Avg MB per transfer"] == 0.0
+        assert stats.is_empty() is True
+
+        for i in range(10):
+            stats.record_successful_transfer(prepare_time=100.0 + i,
+                                             transfer_time=200.0 + i,
+                                             mb_transferred=20 + i)
+        reduced = stats.reduce()
+
+        assert reduced["Avg KV transfer prepare time (ms)"] == 104.5
+        assert reduced["P90 KV transfer prepare time (ms)"] == 108.1
+        assert reduced["Avg KV transfer time (ms)"] == 204.5
+        assert reduced["P90 KV transfer time (ms)"] == 208.1
+        assert reduced["Avg MB per transfer"] == 24.5
+        assert stats.is_empty() is False
+
+    def test_tpu_stats_aggregation_failed_transfer(self):
+        stats = TpuKVConnectorStats()
+
+        reduced = stats.reduce()
+        assert sum(reduced["Num failed transfers"]) == 0
+        assert stats.is_empty() is True
+
+        for i in range(10):
+            stats.record_failed_transfer()
+        reduced = stats.reduce()
+
+        assert sum(reduced["Num failed transfers"]) == 10
         assert stats.is_empty() is False
 
     def test_prometheus_observation(self):
-        metrics = TpuKVConnectorPromMetrics(vllm_config=MagicMock(),
-                                            labelnames=["model_name"])
+        metric_types = {
+            Gauge: Gauge,
+            Counter: Counter,
+            Histogram: Histogram,
+        }
+        labelnames = ["model_name", "engine"]
+        per_engine_labelvalues = {0: ["my_model", "0"]}
+        metrics = TpuKVConnectorPromMetrics(
+            vllm_config=MagicMock(),
+            metric_types=metric_types,
+            labelnames=labelnames,
+            per_engine_labelvalues=per_engine_labelvalues)
 
         mock_data = {
-            "d2h_slice_time": [10.5, 20.5],
-            "d2h_transfer_time": [100.0, 200.0],
-            "prepare_time": [5.0, 5.0],
-            "transfer_time": [1000.0, 1000.0],
-            "mb_transferred": [256.0, 256.0],
+            "d2h_slice_time": [10.0, 20.0, 30.0],
+            "d2h_transfer_time": [100.0, 200.0, 300.0],
+            "prepare_time": [1.1, 2.2, 3.3],
+            "transfer_time": [1200.0, 5400.0, 12000.0],
+            "mb_transferred": [128.0, 256.0, 1024.0],
+            "num_failed_transfers": [0, 1, 2],
         }
 
-        # Should not raise any errors
         metrics.observe(mock_data, engine_idx=0)
+
+        hist = metrics.tpu_histogram_d2h_slice_time[0]
+        assert hist._sum.get() == 60.0
+        # Cumulative values <= 1.0
+        assert hist._buckets[0].get() == 0.0
+        # Cumulative values <= 10.0
+        assert hist._buckets[1].get() == 1.0
+        # Cumulative values <= 100.0
+        assert hist._buckets[2].get() == 2.0
+        # Cumulative values <= 250.0
+        assert hist._buckets[3].get() == 0.0
+        # Cumulative values <= 500.0
+        assert hist._buckets[4].get() == 0.0
+        # Cumulative values <= 750.0
+        assert hist._buckets[5].get() == 0.0
+        # Cumulative values <= 1000.0
+        assert hist._buckets[6].get() == 0.0
+        # Cumulative values <= 2500.0
+        assert hist._buckets[7].get() == 0.0
+        # Cumulative values <= 5000.0
+        assert hist._buckets[8].get() == 0.0
+        # Cumulative values <= 7500.0
+        assert hist._buckets[9].get() == 0.0
+        # Cumulative values <= 10000.0
+        assert hist._buckets[10].get() == 0.0
+        # Cumulative values <= 25000.0
+        assert hist._buckets[11].get() == 0.0
+        # Cumulative values <= 50000.0
+        assert hist._buckets[12].get() == 0.0
+        # Cumulative values <= inf
+        assert hist._buckets[13].get() == 0.0
+
+        counter = metrics.counter_tpu_num_failed_transfers[0]
+        assert counter._value.get() == 3.0
 
 
 if __name__ == "__main__":

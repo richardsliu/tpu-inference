@@ -162,7 +162,7 @@ class TpuKVConnectorPromMetrics(KVConnectorPromMetrics):
             name="vllm:tpu_d2h_slice_time_ms",
             documentation=
             "Histogram of D2H slice duration for TPU KV Cache transfers.",
-            buckets=buckets[1:],
+            buckets=buckets,
             labelnames=labelnames,
         )
         self.tpu_histogram_d2h_slice_time = create_metric_per_engine(
@@ -171,7 +171,7 @@ class TpuKVConnectorPromMetrics(KVConnectorPromMetrics):
             name="vllm:tpu_d2h_transfer_time_ms",
             documentation=
             "Histogram of D2H transfer duration for TPU KV Cache transfers.",
-            buckets=buckets[1:],
+            buckets=buckets,
             labelnames=labelnames,
         )
         self.tpu_histogram_d2h_transfer_time = create_metric_per_engine(
@@ -180,7 +180,7 @@ class TpuKVConnectorPromMetrics(KVConnectorPromMetrics):
             name="vllm:tpu_kv_prepare_time_ms",
             documentation=
             "Histogram of prepare duration for TPU KV Cache transfers.",
-            buckets=buckets[1:],
+            buckets=buckets,
             labelnames=labelnames,
         )
         self.tpu_histogram_kv_prepare_time = create_metric_per_engine(
@@ -189,7 +189,7 @@ class TpuKVConnectorPromMetrics(KVConnectorPromMetrics):
             name="vllm:tpu_kv_transfer_time_ms",
             documentation=
             "Histogram of transfer duration for TPU KV Cache transfers.",
-            buckets=buckets[1:],
+            buckets=buckets,
             labelnames=labelnames,
         )
         self.tpu_histogram_kv_transfer_time = create_metric_per_engine(
