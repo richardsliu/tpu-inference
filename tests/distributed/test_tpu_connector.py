@@ -13,10 +13,11 @@
 # limitations under the License.
 
 import unittest
+from functools import partial
 from unittest.mock import MagicMock, patch
 
 import numpy as np
-from prometheus_client import Counter, Gauge, Histogram
+from prometheus_client import CollectorRegistry, Counter, Gauge, Histogram
 from vllm.distributed.kv_transfer.kv_connector.v1.base import KVConnectorRole
 from vllm.v1.request import RequestStatus
 
@@ -534,6 +535,45 @@ class TestTPUConnectorUtils(unittest.TestCase):
 
 class TestTPUConnectorStats(unittest.TestCase):
 
+    def setUp(self):
+        self.registry = CollectorRegistry()
+        metric_types = {
+            Gauge: partial(Gauge, registry=self.registry),
+            Counter: partial(Counter, registry=self.registry),
+            Histogram: partial(Histogram, registry=self.registry),
+        }
+        labelnames = ["model_name", "engine"]
+        per_engine_labelvalues = {0: ["my_model", "0"]}
+        self.metrics = TpuKVConnectorPromMetrics(
+            vllm_config=MagicMock(),
+            metric_types=metric_types,
+            labelnames=labelnames,
+            per_engine_labelvalues=per_engine_labelvalues)
+
+        mock_data = {
+            "d2h_slice_time": [10.0, 20.0, 30.0],
+            "d2h_transfer_time": [100.0, 200.0, 300.0],
+            "prepare_time": [1.1, 2.2, 3.3],
+            "transfer_time": [1200.0, 5400.0, 12000.0],
+            "mb_transferred": [128.0, 256.0, 2048.0],
+            "num_failed_transfers": [0, 1, 2],
+        }
+
+        self.metrics.observe(mock_data, engine_idx=0)
+
+    def validate_prometheus_histogram_buckets(self, hist, num_buckets,
+                                              non_zero_buckets):
+        assert len(
+            hist._buckets
+        ) == num_buckets, f"Incorrect number of buckets returned: expected {num_buckets} actual {len(hist._buckets)}"
+        for i in range(num_buckets):
+            if i in non_zero_buckets:
+                assert hist._buckets[i].get() == non_zero_buckets[
+                    i], f"Incorrect value for bucket {i}: expected {non_zero_buckets[i]} actual: {hist._buckets[i].get()}"
+            else:
+                assert hist._buckets[i].get(
+                ) == 0, f"Incorrect value for bucket {i}: expected 0 actual: {hist._buckets[i].get()}"
+
     def test_tpu_stats_aggregation_d2h_transfer(self):
         stats = TpuKVConnectorStats()
 
@@ -593,63 +633,65 @@ class TestTPUConnectorStats(unittest.TestCase):
         assert sum(reduced["Num failed transfers"]) == 10
         assert stats.is_empty() is False
 
-    def test_prometheus_observation(self):
-        metric_types = {
-            Gauge: Gauge,
-            Counter: Counter,
-            Histogram: Histogram,
-        }
-        labelnames = ["model_name", "engine"]
-        per_engine_labelvalues = {0: ["my_model", "0"]}
-        metrics = TpuKVConnectorPromMetrics(
-            vllm_config=MagicMock(),
-            metric_types=metric_types,
-            labelnames=labelnames,
-            per_engine_labelvalues=per_engine_labelvalues)
-
-        mock_data = {
-            "d2h_slice_time": [10.0, 20.0, 30.0],
-            "d2h_transfer_time": [100.0, 200.0, 300.0],
-            "prepare_time": [1.1, 2.2, 3.3],
-            "transfer_time": [1200.0, 5400.0, 12000.0],
-            "mb_transferred": [128.0, 256.0, 1024.0],
-            "num_failed_transfers": [0, 1, 2],
-        }
-
-        metrics.observe(mock_data, engine_idx=0)
-
-        hist = metrics.tpu_histogram_d2h_slice_time[0]
+    def test_prometheus_histogram_d2h_slice_time(self):
+        hist = self.metrics.tpu_histogram_d2h_slice_time[0]
         assert hist._sum.get() == 60.0
-        # Cumulative values <= 1.0
-        assert hist._buckets[0].get() == 0.0
-        # Cumulative values <= 10.0
-        assert hist._buckets[1].get() == 1.0
-        # Cumulative values <= 100.0
-        assert hist._buckets[2].get() == 2.0
-        # Cumulative values <= 250.0
-        assert hist._buckets[3].get() == 0.0
-        # Cumulative values <= 500.0
-        assert hist._buckets[4].get() == 0.0
-        # Cumulative values <= 750.0
-        assert hist._buckets[5].get() == 0.0
-        # Cumulative values <= 1000.0
-        assert hist._buckets[6].get() == 0.0
-        # Cumulative values <= 2500.0
-        assert hist._buckets[7].get() == 0.0
-        # Cumulative values <= 5000.0
-        assert hist._buckets[8].get() == 0.0
-        # Cumulative values <= 7500.0
-        assert hist._buckets[9].get() == 0.0
-        # Cumulative values <= 10000.0
-        assert hist._buckets[10].get() == 0.0
-        # Cumulative values <= 25000.0
-        assert hist._buckets[11].get() == 0.0
-        # Cumulative values <= 50000.0
-        assert hist._buckets[12].get() == 0.0
-        # Cumulative values <= inf
-        assert hist._buckets[13].get() == 0.0
+        num_buckets = 14
+        non_zero_buckets = {
+            1: 1.0,
+            2: 2.0,
+        }
+        self.validate_prometheus_histogram_buckets(hist, num_buckets,
+                                                   non_zero_buckets)
 
-        counter = metrics.counter_tpu_num_failed_transfers[0]
+    def test_prometheus_histogram_d2h_transfer_time(self):
+        hist = self.metrics.tpu_histogram_d2h_transfer_time[0]
+        assert hist._sum.get() == 600.0
+        num_buckets = 14
+        non_zero_buckets = {
+            2: 1.0,
+            3: 1.0,
+            4: 1.0,
+        }
+        self.validate_prometheus_histogram_buckets(hist, num_buckets,
+                                                   non_zero_buckets)
+
+    def test_prometheus_histogram_kv_prepare_time(self):
+        hist = self.metrics.tpu_histogram_kv_prepare_time[0]
+        assert hist._sum.get() == 6.6
+        num_buckets = 14
+        non_zero_buckets = {
+            1: 3.0,
+        }
+        self.validate_prometheus_histogram_buckets(hist, num_buckets,
+                                                   non_zero_buckets)
+
+    def test_prometheus_histogram_kv_transfer_time(self):
+        hist = self.metrics.tpu_histogram_kv_transfer_time[0]
+        assert hist._sum.get() == 18600.0
+        num_buckets = 14
+        non_zero_buckets = {
+            7: 1.0,
+            9: 1.0,
+            11: 1.0,
+        }
+        self.validate_prometheus_histogram_buckets(hist, num_buckets,
+                                                   non_zero_buckets)
+
+    def test_prometheus_histogram_kv_megabytes_transferred(self):
+        hist = self.metrics.tpu_histogram_kv_megabytes_transferred[0]
+        assert hist._sum.get() == 2432.0
+        num_buckets = 9
+        non_zero_buckets = {
+            2: 1.0,
+            3: 1.0,
+            6: 1.0,
+        }
+        self.validate_prometheus_histogram_buckets(hist, num_buckets,
+                                                   non_zero_buckets)
+
+    def test_prometheus_counter_num_failed_transfers(self):
+        counter = self.metrics.counter_tpu_num_failed_transfers[0]
         assert counter._value.get() == 3.0
 
 
