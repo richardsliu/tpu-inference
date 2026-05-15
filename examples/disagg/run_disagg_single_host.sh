@@ -64,8 +64,8 @@ REQUEST_RATE=${REQUEST_RATE:=4}
 NUM_PREFILL_INSTANCES=1
 NUM_DECODE_INSTANCES=1
 if [ "${TPU_VERSION:-}" = "tpu7x" ]; then
-    PREFILLER_TP_SIZE=2
-    DECODER_TP_SIZE=2
+    PREFILLER_TP_SIZE=1
+    DECODER_TP_SIZE=1
 else
     PREFILLER_TP_SIZE=1
     DECODER_TP_SIZE=1
@@ -166,7 +166,7 @@ for i in $(seq 0 $((NUM_PREFILL_INSTANCES-1))); do
     \
     vllm serve $MODEL \
     --port $PORT \
-    --gpu-memory-utilization 0.3 \
+    --gpu-memory-utilization 0.25 \
     --max-num-batched-tokens 1024 \
     --block-size 128 \
     --no-enable-prefix-caching \
